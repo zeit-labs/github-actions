@@ -1,0 +1,60 @@
+name: "Add Issue to GitHub Project"
+description: "Automatically adds a new issue to a GitHub Project and assigns a status."
+inputs:
+  github_token:
+    description: "GitHub PAT with access to the project"
+    required: true
+  project_id:
+    description: "GitHub Project ID"
+    required: true
+  status_field_id:
+    description: "Project field ID for 'Status'"
+    required: true
+  status_option_id:
+    description: "Option ID for 'Backlog' status"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Get Issue ID
+      shell: bash
+      run: echo "ISSUE_ID=${{ github.event.issue.node_id }}" >> $GITHUB_ENV
+
+    - name: Add Issue to GitHub Project
+      shell: bash
+      run: |
+        ITEM_ID=$(gh api graphql -f query='
+        mutation {
+          addProjectV2ItemById(input: {projectId: "${{ inputs.project_id }}", contentId: "'$ISSUE_ID'"}) {
+            item {
+              id
+            }
+          }
+        }' --jq '.data.addProjectV2ItemById.item.id')
+
+        echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Wait for GitHub API to process the item
+      shell: bash
+      run: sleep 3
+
+    - name: Update Issue Status to "Backlog"
+      shell: bash
+      run: |
+        gh api graphql -f query='
+        mutation {
+          updateProjectV2ItemFieldValue(input: { 
+            projectId: "${{ inputs.project_id }}", 
+            itemId: "'$ITEM_ID'", 
+            fieldId: "${{ inputs.status_field_id }}",
+            value: { singleSelectOptionId: "${{ inputs.status_option_id }}" }
+          }) {
+            projectV2Item {
+              id
+            }
+          }
+        }'
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
