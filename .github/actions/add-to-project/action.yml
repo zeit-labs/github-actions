@@ -20,7 +20,30 @@ runs:
       shell: bash
       run: echo "ISSUE_ID=${{ github.event.issue.node_id }}" >> $GITHUB_ENV
 
-    - name: Add Issue to GitHub Project
+    - name: Check if Issue is already in Project
+      shell: bash
+      run: |
+        EXISTING_ITEM_ID=$(gh api graphql -f query='
+        query {
+          node(id: "'$ISSUE_ID'") {
+            ... on Issue {
+              projectItems(first: 10) {
+                nodes {
+                  id
+                  project {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }' --jq '.data.node.projectItems.nodes[] | select(.project.id=="${{ inputs.project_id }}") | .id')
+        echo "EXISTING_ITEM_ID=$EXISTING_ITEM_ID" >> $GITHUB_ENV
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Add Issue to GitHub Project (if not already added)
+      if: env.EXISTING_ITEM_ID == ''
       shell: bash
       run: |
         ITEM_ID=$(gh api graphql -f query='
@@ -31,16 +54,22 @@ runs:
             }
           }
         }' --jq '.data.addProjectV2ItemById.item.id')
-
         echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
       env:
         GH_TOKEN: ${{ inputs.github_token }}
 
+    - name: Set ITEM_ID to EXISTING_ITEM_ID if already in project
+      if: env.EXISTING_ITEM_ID != ''
+      shell: bash
+      run: echo "ITEM_ID=$EXISTING_ITEM_ID" >> $GITHUB_ENV
+
     - name: Wait for GitHub API to process the item
+      if: env.EXISTING_ITEM_ID == ''
       shell: bash
       run: sleep 3
 
     - name: Update Issue Status to "Backlog"
+      if: env.EXISTING_ITEM_ID == ''
       shell: bash
       run: |
         gh api graphql -f query='
